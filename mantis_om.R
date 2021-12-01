@@ -17,17 +17,20 @@ library(ggridges)
 # model characteristics
 #############################
 sizes         <-seq(50,190,10) # choose start sizes so they have roughly the same intermolt duration
-growth_month  <-c(7,3)         # month in which growth occurs
-rec_month     <-c(8,2)         # month in which recruitment occurs
+growth_month  <-c(3,7)         # month in which growth occurs
+rec_month     <-c(2,8)         # month in which recruitment occurs
 spawning_month<-c(6,12)        # months in which spawning occurs (not actually used yet)
 years         <-seq(2009,2021) # simulated year span
 total_time_steps<-length(years)*12
 
 nat_mort      <-1
 fmort         <-rep(1,length(years))
-fish_month    <-c(3,4,5,6,10,11,12)                 # natural mortality
+fish_month    <-c(3,4,5,6,10,11,12)                 # this is the months in which fishing occurs
 fish_prop     <-c(0,0,.1,.1,.1,.05,0,0,0,.3,.2,.15) # this is the proportion of fish_mort that occurs in a month
 fish_mort     <-rnorm(length(years),0.05,0.5)       # this is the fishing mortality by year...have to think about best way to do this
+
+#==both fish_month and fish_prop could be turned into matrices
+#==so that the months fished over time can change
 
 #==mid points to the size bins from 'sizes'
 in_break<-sizes
