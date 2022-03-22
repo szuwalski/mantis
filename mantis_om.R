@@ -17,20 +17,9 @@ library(ggridges)
 # model characteristics
 #############################
 sizes         <-seq(50,190,10) # choose start sizes so they have roughly the same intermolt duration
-growth_month  <-c(3,7)         # month in which growth occurs
-rec_month     <-c(2,8)         # month in which recruitment occurs
-spawning_month<-c(6,12)        # months in which spawning occurs (not actually used yet)
 years         <-seq(2009,2021) # simulated year span
 total_time_steps<-length(years)*12
-
-nat_mort      <-1
-fmort         <-rep(1,length(years))
-fish_month    <-c(3,4,5,6,10,11,12)                 # this is the months in which fishing occurs
-fish_prop     <-c(0,0,.1,.1,.1,.05,0,0,0,.3,.2,.15) # this is the proportion of fish_mort that occurs in a month
-fish_mort     <-rnorm(length(years),0.05,0.5)       # this is the fishing mortality by year...have to think about best way to do this
-
-#==both fish_month and fish_prop could be turned into matrices
-#==so that the months fished over time can change
+all_months    <-seq(1,total_time_steps)
 
 #==mid points to the size bins from 'sizes'
 in_break<-sizes
@@ -38,12 +27,34 @@ mid_pts<-rep(0,length(in_break)-1)
 for(x in 1:length(mid_pts))
   mid_pts[x] <- (in_break[x]+in_break[x+1])/2
 
+nat_mort      <-1
+
+fish_prop     <-c(0,0,.1,.1,.1,.1,0,0,0,.2,.2,.15) # this is the proportion of fish_mort that occurs in a month
+fish_months   <-all_months[which(all_months*rep(fish_prop,length(years))!=0)]
+
+grow_month    <-c(0,0,1,0,0,0,1,0,0,0,0,0)
+rec_month     <-c(0,1,0,0,0,0,0,1,0,0,0,0)
+spawn_month   <-c(0,0,0,0,0,0,1,0,0,0,0,1)
+
+growth_months   <-all_months[which(all_months*rep(grow_month,length(years))!=0)]
+rec_months    <-all_months[which(all_months*rep(rec_month,length(years))!=0)]
+spawn_months  <-all_months[which(all_months*rep(spawn_month,length(years))!=0)]
+
+#==both fish_month and fish_prop could be turned into matrices
+#==so that the months fished over time can change
+
+
 #==fishery selectivity
-fish_50<-65
+fish_50<-75
 fish_slope<-1
 fish_sel<-1/(1+exp(-fish_slope*(mid_pts-fish_50)))
 #==check it
 plot(fish_sel,type='b')
+
+f_mort1              <-matrix(0,ncol=length(mid_pts),nrow=total_time_steps)
+in_fmort             <-rnorm(length(fish_months),0.15,0.05)
+f_mort1[fish_months,]<-in_fmort
+f_mort              <-sweep(f_mort1,2,fish_sel,FUN="*")
 
 ###################################
 #==build a size transition matrix==
@@ -85,7 +96,7 @@ make_size_trans<-function(alpha,beta,growth_sd,out_plot=FALSE,no_x=FALSE,
   list(size_trans_mat,p)
 }
 
-size_trans_1<-make_size_trans(alpha=4,beta=1.1,
+size_trans_1<-make_size_trans(alpha=4,beta=1.2,
                               growth_sd=rep(5,length(mid_pts)),out_plot=F,no_x=FALSE,input_size=mid_pts)
 # plot size transition matrix
 size_trans_1[[2]]
@@ -103,7 +114,7 @@ for(x in 1:4)
  counter<-0
  while(counter<x)
  {
-   dummy<-(dummy%*%size_trans_1[[1]])*exp(-nat_mort/length(growth_month))
+   dummy<-(dummy%*%size_trans_1[[1]])*exp(-nat_mort/length(grow_month))
    counter<-counter+1
  }
  init_numbers[x,]<-dummy
@@ -120,31 +131,49 @@ for(x in 1:4)
  n_matrix<-matrix(ncol=length(mid_pts),nrow=c(total_time_steps))
  n_matrix[1,]<-apply(init_numbers,2,sum)
  c_matrix<-matrix(ncol=length(mid_pts),nrow=c(total_time_steps))
+ log_recruits<-rep(0,total_time_steps)
+ in_log_rec<-rnorm(length(rec_months),20,0.5)
+ log_recruits[rec_months] <- in_log_rec
    
-for(x in 1:(total_time_steps-1))
+for(x in 1:(total_time_steps))
 {
  #==recruitment(this could be spread over several size bins)
   #==this can also be linked to spawning biomass later
-  if(any(x%%rec_month==0))
-    n_matrix[x,1]<-n_matrix[x,1] + exp(rnorm(1,10,1))
+  if(any(rec_months==x))
+    n_matrix[x,1]<-n_matrix[x,1] + exp(log_recruits[x])
   
  #==growth
-  if(any(x%%growth_month==0))
+  if(any(growth_months==x))
     n_matrix[x,]<-n_matrix[x,]%*%size_trans_1[[1]]
   
   #==fishing
   #==need a better way to do this...
-  if(any(x%%fish_month==0))
-  {
-    n_matrix[x,]<-n_matrix[x,]*(exp(-fish_sel*fmort[x%%12+1]*fish_prop[x%%12+1]))
-    c_matrix[x,]<-n_matrix[x,]*(1-exp(-fish_sel*fmort[x%%12+1]*fish_prop[x%%12+1]))   
-  }
-  
+    n_matrix[x,]<-n_matrix[x,]*(exp(-f_mort[x,]))
+    c_matrix[x,]<-n_matrix[x,]*(1-exp(-f_mort[x,]))   
+
   #==natural mortality
-  n_matrix[x+1,]<-n_matrix[x,]*exp(-nat_mort/12)
+    if(x<total_time_steps)
+     n_matrix[x+1,]<-n_matrix[x,]*exp(-nat_mort/12)
 
 }
 
+ dat_file<-'admb/mantis_pindat.DAT'
+ file.create(dat_file)
+ 
+ cat("# log_rec",file=dat_file,append=TRUE)
+ cat("\n",file=dat_file,append=TRUE)
+ cat(in_log_rec,file=dat_file,append=TRUE)
+ cat("\n",file=dat_file,append=TRUE)
+ cat("# fmort",file=dat_file,append=TRUE)
+ cat("\n",file=dat_file,append=TRUE)
+ cat(in_fmort,file=dat_file,append=TRUE)
+ cat("\n",file=dat_file,append=TRUE)
+ cat("# init_n_at_l",file=dat_file,append=TRUE)
+ cat("\n",file=dat_file,append=TRUE)
+ cat(log(n_matrix[1,]),file=dat_file,append=TRUE) 
+ 
+ 
+ 
 ####################################
 # visualize population
 ################################
@@ -196,10 +225,145 @@ cat_yr<-in_g%>%
   summarize(tot_catch = sum(Numbers,na.rm=T))
  
 ggplot()+
-  geom_line(data=num_yr,aes(x=year,y=tot_num))+
   geom_line(data=cat_yr,aes(x=year,y=tot_catch),col='red')+
   theme_bw()  
  
 ###########################
-# next steps...
+# write a .DAT file
 ###########################  
+all_months<-seq(1,(total_time_steps))
+survey_sampling_1<-all_months[which(all_months%%8==0)]
+survey_sampling_2<-all_months[which(all_months%%5==0)]
+survey_sampling_3<-seq(96,108)
+use_surv_samp<-sort(union(union(survey_sampling_1,survey_sampling_2),survey_sampling_3))
+in_sd<-0.2
+
+#==survey selectivity
+surv_50<-60
+surv_slope<-.3
+surv_sel<-1/(1+exp(-surv_slope*(mid_pts-surv_50)))
+#plot(surv_sel,type='b')
+
+#==calculate fishing months
+fish_months<-all_months[which(all_months*rep(fish_prop,length(years))!=0)]
+
+dat_file<-'admb/mantis.DAT'
+file.create(dat_file)
+
+cat("# simulated mantis shrimp data file",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+cat("# start_mo",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+cat(1,file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+cat("# end_mo",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+cat(total_time_steps,file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+
+cat("# number of sizes",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+cat(length(mid_pts),file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+
+cat("# sizes",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+cat(mid_pts,file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+
+cat("# number of survey months",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+cat(length(use_surv_samp),file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+
+cat("# survey months",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+cat(use_surv_samp,file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+
+cat("# survey numbers",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+surv_obs<-sweep(n_matrix,2,surv_sel,FUN="*")[use_surv_samp,]
+surv_obs_error<-apply(surv_obs,1,sum)*exp(rnorm(nrow(surv_obs),0,in_sd))
+cat(surv_obs_error,file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+
+cat("# survey size composition",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+for(x in 1:nrow(surv_obs))
+{
+  size_comp<-hist(sample(mid_pts,size=10000,prob=surv_obs[x,],replace=TRUE),plot=FALSE,breaks=sizes)$density
+  cat(size_comp/sum(size_comp),file=dat_file,append=TRUE)
+  cat("\n",file=dat_file,append=TRUE)
+}
+
+cat("# number of catch months",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+cat(length(fish_months),file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+
+# cat("# which catch months",file=dat_file,append=TRUE)
+# cat("\n",file=dat_file,append=TRUE)
+# cat(which((fish_prop!=0)),file=dat_file,append=TRUE)
+# cat("\n",file=dat_file,append=TRUE)
+
+cat("# all catch months",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+cat(fish_months,file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+
+cat("# catch numbers",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+catch_obs<-c_matrix[fish_months,]
+catch_obs_error<-apply(c_matrix[fish_months,],1,sum)*exp(rnorm(length(fish_months),0,in_sd))
+cat(catch_obs_error,file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+
+cat("# catch size composition",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+for(x in 1:nrow(catch_obs))
+{
+  size_comp<-hist(sample(mid_pts,size=10000,prob=catch_obs[x,],replace=TRUE),plot=FALSE,breaks=sizes)$density
+  cat(size_comp/sum(size_comp),file=dat_file,append=TRUE)
+  cat("\n",file=dat_file,append=TRUE)
+}
+
+# cat("# number of recruitment months",file=dat_file,append=TRUE)
+# cat("\n",file=dat_file,append=TRUE)
+# cat(sum(rec_month),file=dat_file,append=TRUE)
+# cat("\n",file=dat_file,append=TRUE)
+# 
+# cat("# which recruitment months",file=dat_file,append=TRUE)
+# cat("\n",file=dat_file,append=TRUE)
+# cat(which(rec_month!=0),file=dat_file,append=TRUE)
+# cat("\n",file=dat_file,append=TRUE)
+
+cat("# number of total recruitment months",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+cat(length(rec_months),file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+
+cat("# all recruitment months",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+cat(rec_months,file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+
+cat("# number of growth months",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+cat(sum(grow_month),file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+
+cat("# which growth months",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+cat(which(grow_month!=0),file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+
+# cat("# number of total growth months",file=dat_file,append=TRUE)
+# cat("\n",file=dat_file,append=TRUE)
+# cat(length(growth_months),file=dat_file,append=TRUE)
+# cat("\n",file=dat_file,append=TRUE)
+# 
+# cat("# all growth months",file=dat_file,append=TRUE)
+# cat("\n",file=dat_file,append=TRUE)
+# cat(growth_months,file=dat_file,append=TRUE)
+# cat("\n",file=dat_file,append=TRUE)
