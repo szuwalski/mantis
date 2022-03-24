@@ -21,26 +21,33 @@ DATA_SECTION
  init_int growth_n
  init_ivector grow_month(1,growth_n)
  
+ init_number catch_cv
+ init_number surv_cv
+ 
+ init_number catch_eff_n
+ init_number surv_eff_n
+ 
    int ipass;
    int proj_n;
   !!proj_n = 100;
  
 PARAMETER_SECTION
-  init_bounded_vector log_n_at_l_init(1,size_n,1,30,-1)
-  init_bounded_vector log_recruits(1,rec_n,1,30,-1)
-  init_bounded_number nat_m(0.01,4,-2)
+  init_bounded_vector log_n_at_l_init(1,size_n,1,30,1)
+  init_bounded_vector log_recruits(1,rec_n,1,30,1)
+  init_bounded_number nat_m(0.01,4,2)
  
   init_bounded_number surv_q(0.001,1,-3)
-  init_bounded_vector survey_select(1,size_n,0.00001,1,-2)
+  init_bounded_number surv_50(20,80,1)
+  init_bounded_number surv_slope(0.01,2,1) 
   
-  init_bounded_number fish_50(20,80,-1)
-  init_bounded_number fish_slope(0.01,2,-1)
-  init_bounded_vector f_mort(1,cat_dat_mo,0.0001,5,-1) 
+  init_bounded_number fish_50(20,80,1)
+  init_bounded_number fish_slope(0.01,2,1)
+  init_bounded_vector f_mort(1,cat_dat_mo,0.0001,5,1) 
  
-  init_bounded_number growth_alpha(0,10,-3)
-  init_bounded_number growth_beta(0,2,-3)
-  init_bounded_number growth_slope(1,1.5,-4)
-  init_number dummy
+  init_bounded_number growth_alpha(0,10,3)
+  init_bounded_number growth_beta(0,5,3)
+  init_bounded_number growth_slope(1,1.5,4)
+
   //==reference point stuff
   //init_bounded_vector month_f35(1,12)
  
@@ -55,17 +62,21 @@ PARAMETER_SECTION
   matrix pred_c_at_len(start_mo,end_mo+proj_n,1,size_n)
   
   vector fish_sel(1,size_n)
+  vector surv_sel(1,size_n)  
   vector post_molt_size(1,size_n)
   matrix size_trans_matrix(1,size_n,1,size_n)
   matrix applied_f(start_mo,end_mo+proj_n,1,size_n)
   vector add_recruits(start_mo,end_mo+proj_n)
   vector mean_length(1,size_n)
    
-  number survey_ind_like
-  number size_comp_like
+ number catch_like
+ number surv_like
+ number catch_size_comp_like
+ number surv_size_comp_like
   number survey_sel_smooth
   number rec_smooth
-
+  number init_smooth
+  number f_smooth
    
 //==============================================================================
 PROCEDURE_SECTION
@@ -73,6 +84,11 @@ PROCEDURE_SECTION
 // make fishery selectivity
  for(int size=1;size<=size_n;size++)
    fish_sel(size) = 1/(1+mfexp(-fish_slope*(sizes(size)-fish_50)));
+
+// make survey selectivity
+ for(int size=1;size<=size_n;size++)
+   surv_sel(size) = 1/(1+mfexp(-surv_slope*(sizes(size)-surv_50)));
+
 
 // make fishing mortality
  applied_f.initialize();
@@ -142,7 +158,7 @@ FUNCTION get_num_at_len_yr
  i = ipass;
 
  // calculate survey quantities
-     surv_size_comp_pred(i) = elem_prod(n_at_len(i),survey_select);
+     surv_size_comp_pred(i) = elem_prod(n_at_len(i),surv_sel);
 	 surv_pred(i)=0;
 	 for(j=1;j<=size_n;j++)
 		surv_pred(i) += surv_size_comp_pred(i,j);
@@ -170,6 +186,8 @@ FUNCTION get_num_at_len_yr
 //==============================================================================
 FUNCTION evaluate_the_objective_function
   
+  f=0;
+  
   catch_pred.initialize();
   for(int i=start_mo;i<=end_mo;i++)
    for(int j =1;j<=size_n;j++)
@@ -179,35 +197,59 @@ FUNCTION evaluate_the_objective_function
    for(int j =1;j<=size_n;j++)
 	 if(catch_pred(i)>0)
       catch_size_comp_pred(i,j) = pred_c_at_len(i,j)/catch_pred(i);
-  
-  
 
+  //likelihoods
+  // catch abundance
+  catch_like = 0;
+  for(int time=1;time<=cat_dat_mo;time++)
+     catch_like += square( log(catch_pred(cat_months(time))) - log(cat_obs_n(time))) / (2.0 * square(catch_cv));
 
-  // likelihoods
-  // imm_num_like = 0;
-  // for (int year=styr;year<=endyr;year++)
-    // imm_num_like += square( log(imm_numbers_pred(year)) - log(imm_n_obs(year))) / (2.0 * square(sigma_numbers_imm(year)));
+ f += catch_like;
 
+  // catch size composition data
+  catch_size_comp_like = 0;
+   for(int time=1;time<=cat_dat_mo;time++)
+	 for(int size=1;size<=size_n;size++)
+      if (cat_size_comp_obs(time,size) >0.001)
+       catch_size_comp_like += catch_eff_n*(cat_size_comp_obs(time,size)) * log( catch_size_comp_pred(cat_months(time),size)/ cat_size_comp_obs(time,size));
+  catch_size_comp_like = -1*catch_size_comp_like;
  
+ f += catch_size_comp_like;
  
-  // immature numbers at size data
-  // imm_like = 0;
-  // for (int year=styr;year<=endyr;year++)
-   // for (int size=1;size<=size_n;size++)
-    // if (imm_n_size_obs(year,size) >0)
-     // imm_like += imm_eff_samp*(imm_n_size_obs(year,size)/sum_imm_numbers_obs(year)) * log( (selectivity(year,size)*imm_n_size_pred(year,size)/imm_numbers_pred(year)) / (imm_n_size_obs(year,size)/sum_imm_numbers_obs(year)));
-  // imm_like = -1*imm_like;
-  
+  //=================================
+ // survey abundance
+  //=================================
+  surv_like = 0;
+  for(int time=1;time<=surv_dat_mo;time++)
+     surv_like += square( log(surv_pred(surv_months(time))) - log(surv_obs_n(time))) / (2.0 * square(surv_cv));
+ 
+  f += surv_like;
+ 
+  // survey size composition data
+  surv_size_comp_like = 0;
+   for(int time=1;time<=surv_dat_mo;time++)
+	 for(int size=1;size<=size_n;size++)
+      if (surv_size_comp_obs(time,size) >0.001)
+       surv_size_comp_like += surv_eff_n*(surv_size_comp_obs(time,size)) * log( surv_size_comp_pred(surv_months(time),size)/ surv_size_comp_obs(time,size));
+  surv_size_comp_like = -1*surv_size_comp_like;
+
+  f += surv_size_comp_like;
+
+
+  init_smooth =0;
+  init_smooth = 0.1* (norm2(first_difference(first_difference(log_n_at_l_init))));
+     f += init_smooth;
+
+  f_smooth =0;
+  f_smooth = 0.1* (norm2(first_difference(first_difference(f_mort))));
+     f += f_smooth;
+	 
+  cout<<surv_size_comp_like<< " " << surv_like << " " << catch_size_comp_like << " " << catch_like << " " << init_smooth << endl;
    
-  // smooth_q_like = 0;
-  // smooth_q_like = smooth_q_weight* (norm2(first_difference(first_difference(q_dev))) +norm2(first_difference(first_difference(q_mat_dev)))) ;
-  
- 
-  f = 0;
-  
 // ========================y==================================================   
 REPORT_SECTION
   report<<"$likelihoods"<<endl;
+  report<<surv_size_comp_like<< " " << surv_like << " " << catch_size_comp_like << " " << catch_like <<endl;
   report <<"$recruits" << endl;
   report << mfexp(log_recruits)<<endl;
   report <<"$sizes" << endl;

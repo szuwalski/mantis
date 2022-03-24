@@ -12,6 +12,7 @@ library(reshape2)
 library(dplyr)
 library(ggplot2)
 library(ggridges)
+library(gridExtra)
 
 #############################
 # model characteristics
@@ -197,10 +198,11 @@ for(x in 1:(total_time_steps))
      group_by(year)%>%
      summarize(tot_num = sum(Numbers,na.rm=T))
    
-   ggplot(data=num_yr,aes(x=year,y=tot_num))+
-     geom_line()+
-     theme_bw()
-   
+  q<- ggplot(data=num_yr,aes(x=year,y=tot_num))+
+     geom_line(lwd=1.4)+
+     theme_bw()+expand_limits(y=0)
+   print(q)
+   grid.arrange(p,q,layout_matrix=matrix(c(1,2,2),ncol=3))
 ####################################
 # visualize catch
 ################################
@@ -224,10 +226,12 @@ cat_yr<-in_g%>%
   group_by(year)%>%
   summarize(tot_catch = sum(Numbers,na.rm=T))
  
-ggplot()+
-  geom_line(data=cat_yr,aes(x=year,y=tot_catch),col='red')+
-  theme_bw()  
- 
+q<- ggplot(data=cat_yr,aes(x=year,y=tot_catch))+
+  geom_line(lwd=1.4)+
+  theme_bw()+expand_limits(y=0)
+print(q)
+grid.arrange(p,q,layout_matrix=matrix(c(1,2,2),ncol=3))
+
 ###########################
 # write a .DAT file
 ###########################  
@@ -235,8 +239,9 @@ all_months<-seq(1,(total_time_steps))
 survey_sampling_1<-all_months[which(all_months%%8==0)]
 survey_sampling_2<-all_months[which(all_months%%5==0)]
 survey_sampling_3<-seq(96,108)
+survey_sampling_3<-1
 use_surv_samp<-sort(union(union(survey_sampling_1,survey_sampling_2),survey_sampling_3))
-in_sd<-0.2
+in_sd<-0.02
 
 #==survey selectivity
 surv_50<-60
@@ -358,6 +363,25 @@ cat("\n",file=dat_file,append=TRUE)
 cat(which(grow_month!=0),file=dat_file,append=TRUE)
 cat("\n",file=dat_file,append=TRUE)
 
+cat("# catch cv",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+cat(in_sd,file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+
+cat("# survey cv",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+cat(in_sd,file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+
+cat("# catch eff N",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+cat(150,file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+
+cat("# survey eff N",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+cat(150,file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
 # cat("# number of total growth months",file=dat_file,append=TRUE)
 # cat("\n",file=dat_file,append=TRUE)
 # cat(length(growth_months),file=dat_file,append=TRUE)

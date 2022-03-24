@@ -64,6 +64,10 @@ model_data::model_data(int argc,char * argv[]) : ad_comm(argc,argv)
   rec_month.allocate(1,rec_n,"rec_month");
   growth_n.allocate("growth_n");
   grow_month.allocate(1,growth_n,"grow_month");
+  catch_cv.allocate("catch_cv");
+  surv_cv.allocate("surv_cv");
+  catch_eff_n.allocate("catch_eff_n");
+  surv_eff_n.allocate("surv_eff_n");
 proj_n = 100;
   if (global_datafile)
   {
@@ -76,18 +80,18 @@ model_parameters::model_parameters(int sz,int argc,char * argv[]) :
  model_data(argc,argv) , function_minimizer(sz)
 {
   initializationfunction();
-  log_n_at_l_init.allocate(1,size_n,1,30,-1,"log_n_at_l_init");
-  log_recruits.allocate(1,rec_n,1,30,-1,"log_recruits");
-  nat_m.allocate(0.01,4,-2,"nat_m");
+  log_n_at_l_init.allocate(1,size_n,1,30,1,"log_n_at_l_init");
+  log_recruits.allocate(1,rec_n,1,30,1,"log_recruits");
+  nat_m.allocate(0.01,4,2,"nat_m");
   surv_q.allocate(0.001,1,-3,"surv_q");
-  survey_select.allocate(1,size_n,0.00001,1,-2,"survey_select");
-  fish_50.allocate(20,80,-1,"fish_50");
-  fish_slope.allocate(0.01,2,-1,"fish_slope");
-  f_mort.allocate(1,cat_dat_mo,0.0001,5,-1,"f_mort");
-  growth_alpha.allocate(0,10,-3,"growth_alpha");
-  growth_beta.allocate(0,2,-3,"growth_beta");
-  growth_slope.allocate(1,1.5,-4,"growth_slope");
-  dummy.allocate("dummy");
+  surv_50.allocate(20,80,1,"surv_50");
+  surv_slope.allocate(0.01,2,1,"surv_slope");
+  fish_50.allocate(20,80,1,"fish_50");
+  fish_slope.allocate(0.01,2,1,"fish_slope");
+  f_mort.allocate(1,cat_dat_mo,0.0001,5,1,"f_mort");
+  growth_alpha.allocate(0,10,3,"growth_alpha");
+  growth_beta.allocate(0,5,3,"growth_beta");
+  growth_slope.allocate(1,1.5,4,"growth_slope");
   f.allocate("f");
   prior_function_value.allocate("prior_function_value");
   likelihood_function_value.allocate("likelihood_function_value");
@@ -119,6 +123,10 @@ model_parameters::model_parameters(int sz,int argc,char * argv[]) :
   #ifndef NO_AD_INITIALIZE
     fish_sel.initialize();
   #endif
+  surv_sel.allocate(1,size_n,"surv_sel");
+  #ifndef NO_AD_INITIALIZE
+    surv_sel.initialize();
+  #endif
   post_molt_size.allocate(1,size_n,"post_molt_size");
   #ifndef NO_AD_INITIALIZE
     post_molt_size.initialize();
@@ -139,13 +147,21 @@ model_parameters::model_parameters(int sz,int argc,char * argv[]) :
   #ifndef NO_AD_INITIALIZE
     mean_length.initialize();
   #endif
-  survey_ind_like.allocate("survey_ind_like");
+  catch_like.allocate("catch_like");
   #ifndef NO_AD_INITIALIZE
-  survey_ind_like.initialize();
+  catch_like.initialize();
   #endif
-  size_comp_like.allocate("size_comp_like");
+  surv_like.allocate("surv_like");
   #ifndef NO_AD_INITIALIZE
-  size_comp_like.initialize();
+  surv_like.initialize();
+  #endif
+  catch_size_comp_like.allocate("catch_size_comp_like");
+  #ifndef NO_AD_INITIALIZE
+  catch_size_comp_like.initialize();
+  #endif
+  surv_size_comp_like.allocate("surv_size_comp_like");
+  #ifndef NO_AD_INITIALIZE
+  surv_size_comp_like.initialize();
   #endif
   survey_sel_smooth.allocate("survey_sel_smooth");
   #ifndef NO_AD_INITIALIZE
@@ -155,6 +171,14 @@ model_parameters::model_parameters(int sz,int argc,char * argv[]) :
   #ifndef NO_AD_INITIALIZE
   rec_smooth.initialize();
   #endif
+  init_smooth.allocate("init_smooth");
+  #ifndef NO_AD_INITIALIZE
+  init_smooth.initialize();
+  #endif
+  f_smooth.allocate("f_smooth");
+  #ifndef NO_AD_INITIALIZE
+  f_smooth.initialize();
+  #endif
 }
 
 void model_parameters::userfunction(void)
@@ -162,6 +186,8 @@ void model_parameters::userfunction(void)
   f =0.0;
  for(int size=1;size<=size_n;size++)
    fish_sel(size) = 1/(1+mfexp(-fish_slope*(sizes(size)-fish_50)));
+ for(int size=1;size<=size_n;size++)
+   surv_sel(size) = 1/(1+mfexp(-surv_slope*(sizes(size)-surv_50)));
  applied_f.initialize();
   for(int time=1;time<=cat_dat_mo;time++)
 	 for(int size=1;size<=size_n;size++)
@@ -210,7 +236,7 @@ void model_parameters::get_num_at_len_yr(void)
  dvar_vector temp_n(1,size_n);
  i = ipass;
  // calculate survey quantities
-     surv_size_comp_pred(i) = elem_prod(n_at_len(i),survey_select);
+     surv_size_comp_pred(i) = elem_prod(n_at_len(i),surv_sel);
 	 surv_pred(i)=0;
 	 for(j=1;j<=size_n;j++)
 		surv_pred(i) += surv_size_comp_pred(i,j);
@@ -234,6 +260,7 @@ void model_parameters::get_num_at_len_yr(void)
 
 void model_parameters::evaluate_the_objective_function(void)
 {
+  f=0;
   catch_pred.initialize();
   for(int i=start_mo;i<=end_mo;i++)
    for(int j =1;j<=size_n;j++)
@@ -242,20 +269,42 @@ void model_parameters::evaluate_the_objective_function(void)
    for(int j =1;j<=size_n;j++)
 	 if(catch_pred(i)>0)
       catch_size_comp_pred(i,j) = pred_c_at_len(i,j)/catch_pred(i);
-  // likelihoods
-  // imm_num_like = 0;
-  // for (int year=styr;year<=endyr;year++)
-    // imm_num_like += square( log(imm_numbers_pred(year)) - log(imm_n_obs(year))) / (2.0 * square(sigma_numbers_imm(year)));
-  // immature numbers at size data
-  // imm_like = 0;
-  // for (int year=styr;year<=endyr;year++)
-   // for (int size=1;size<=size_n;size++)
-    // if (imm_n_size_obs(year,size) >0)
-     // imm_like += imm_eff_samp*(imm_n_size_obs(year,size)/sum_imm_numbers_obs(year)) * log( (selectivity(year,size)*imm_n_size_pred(year,size)/imm_numbers_pred(year)) / (imm_n_size_obs(year,size)/sum_imm_numbers_obs(year)));
-  // imm_like = -1*imm_like;
-  // smooth_q_like = 0;
-  // smooth_q_like = smooth_q_weight* (norm2(first_difference(first_difference(q_dev))) +norm2(first_difference(first_difference(q_mat_dev)))) ;
-  f = 0;
+  //likelihoods
+  // catch abundance
+  catch_like = 0;
+  for(int time=1;time<=cat_dat_mo;time++)
+     catch_like += square( log(catch_pred(cat_months(time))) - log(cat_obs_n(time))) / (2.0 * square(catch_cv));
+ f += catch_like;
+  // catch size composition data
+  catch_size_comp_like = 0;
+   for(int time=1;time<=cat_dat_mo;time++)
+	 for(int size=1;size<=size_n;size++)
+      if (cat_size_comp_obs(time,size) >0.001)
+       catch_size_comp_like += catch_eff_n*(cat_size_comp_obs(time,size)) * log( catch_size_comp_pred(cat_months(time),size)/ cat_size_comp_obs(time,size));
+  catch_size_comp_like = -1*catch_size_comp_like;
+ f += catch_size_comp_like;
+  //=================================
+ // survey abundance
+  //=================================
+  surv_like = 0;
+  for(int time=1;time<=surv_dat_mo;time++)
+     surv_like += square( log(surv_pred(surv_months(time))) - log(surv_obs_n(time))) / (2.0 * square(surv_cv));
+  f += surv_like;
+  // survey size composition data
+  surv_size_comp_like = 0;
+   for(int time=1;time<=surv_dat_mo;time++)
+	 for(int size=1;size<=size_n;size++)
+      if (surv_size_comp_obs(time,size) >0.001)
+       surv_size_comp_like += surv_eff_n*(surv_size_comp_obs(time,size)) * log( surv_size_comp_pred(surv_months(time),size)/ surv_size_comp_obs(time,size));
+  surv_size_comp_like = -1*surv_size_comp_like;
+  f += surv_size_comp_like;
+  init_smooth =0;
+  init_smooth = 0.1* (norm2(first_difference(first_difference(log_n_at_l_init))));
+     f += init_smooth;
+  f_smooth =0;
+  f_smooth = 0.1* (norm2(first_difference(first_difference(f_mort))));
+     f += f_smooth;
+  cout<<surv_size_comp_like<< " " << surv_like << " " << catch_size_comp_like << " " << catch_like << " " << init_smooth << endl;
 }
 
 void model_parameters::report(const dvector& gradients)
@@ -268,6 +317,7 @@ void model_parameters::report(const dvector& gradients)
     return;
   }
   report<<"$likelihoods"<<endl;
+  report<<surv_size_comp_like<< " " << surv_like << " " << catch_size_comp_like << " " << catch_like <<endl;
   report <<"$recruits" << endl;
   report << mfexp(log_recruits)<<endl;
   report <<"$sizes" << endl;
