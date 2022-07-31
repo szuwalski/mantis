@@ -37,10 +37,10 @@ PARAMETER_SECTION
   init_bounded_number nat_m(0.01,4,2)
  
   init_bounded_number surv_q(0.001,1,-3)
-  init_bounded_number surv_50(20,80,1)
+  init_bounded_number surv_50(20,100,1)
   init_bounded_number surv_slope(0.01,2,1) 
   
-  init_bounded_number fish_50(20,80,1)
+  init_bounded_number fish_50(20,100,1)
   init_bounded_number fish_slope(0.01,2,1)
   init_bounded_vector f_mort(1,cat_dat_mo,0.0001,5,1) 
  
