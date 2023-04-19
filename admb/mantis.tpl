@@ -18,6 +18,12 @@ DATA_SECTION
 
  init_int rec_n
  init_ivector rec_month(1,rec_n)
+ 
+ !!cout<<rec_month<<endl;
+ 
+ init_int rec_n_yr
+ init_ivector rec_month_yr(1,rec_n_yr)
+ 
  init_int growth_n
  init_ivector grow_month(1,growth_n)
  
@@ -27,9 +33,17 @@ DATA_SECTION
  init_number catch_eff_n
  init_number surv_eff_n
  
+ !!cout<<surv_eff_n<<endl;
+ 
+ init_number m_mu_prior
+ init_number m_sd_prior
+ 
+ init_number growth_var_phase
+  !!cout<<m_sd_prior<<endl;
+ 
    int ipass;
    int proj_n;
-  !!proj_n = 100;
+  !!proj_n = 2000;
  
 PARAMETER_SECTION
   init_bounded_vector log_n_at_l_init(1,size_n,1,30,1)
@@ -45,8 +59,11 @@ PARAMETER_SECTION
   init_bounded_vector f_mort(1,cat_dat_mo,0.0001,5,1) 
  
   init_bounded_number growth_alpha(0,10,3)
-  init_bounded_number growth_beta(0,5,3)
+  init_bounded_number growth_beta(0.0001,5,growth_var_phase)
   init_bounded_number growth_slope(1,1.5,4)
+  
+  init_bounded_number molt_50(20,200,-1)
+  init_bounded_number molt_slope(-2,2,-1)
 
   //==reference point stuff
   //init_bounded_vector month_f35(1,12)
@@ -63,6 +80,7 @@ PARAMETER_SECTION
   
   vector fish_sel(1,size_n)
   vector surv_sel(1,size_n)  
+  vector molt_prob(1,size_n) 
   vector post_molt_size(1,size_n)
   matrix size_trans_matrix(1,size_n,1,size_n)
   matrix applied_f(start_mo,end_mo+proj_n,1,size_n)
@@ -77,6 +95,11 @@ PARAMETER_SECTION
   number rec_smooth
   number init_smooth
   number f_smooth
+  number IsB0
+  number fut_mort
+  number fut_rec
+  
+  number m_prior_like
    
 //==============================================================================
 PROCEDURE_SECTION
@@ -89,6 +112,9 @@ PROCEDURE_SECTION
  for(int size=1;size<=size_n;size++)
    surv_sel(size) = 1/(1+mfexp(-surv_slope*(sizes(size)-surv_50)));
 
+// make moltin probability
+ for(int size=1;size<=size_n;size++)
+   molt_prob(size) = 1/(1+mfexp(-molt_slope*(sizes(size)-molt_50)));
 
 // make fishing mortality
  applied_f.initialize();
@@ -155,6 +181,8 @@ FUNCTION get_num_at_len
 FUNCTION get_num_at_len_yr
  int i,j,flag;
  dvar_vector temp_n(1,size_n);
+ dvar_vector no_molters(1,size_n);
+ dvar_vector molted(1,size_n);
  i = ipass;
 
  // calculate survey quantities
@@ -176,11 +204,26 @@ FUNCTION get_num_at_len_yr
 	for(j=1;j<=growth_n;j++)
 	{	 if((i%12+1)==grow_month(j)) flag = 1;}
 	if(flag)
-		temp_n = temp_n * size_trans_matrix;
-
+	{
+	 no_molters = elem_prod(temp_n,1-molt_prob);
+	 molted = elem_prod(temp_n,molt_prob);
+	 molted = molted * size_trans_matrix;
+	 for(j=1;j<=size_n;j++)
+      temp_n(j) = no_molters(j) + molted(j);
+	}
 	// recruitment
 	temp_n(1) += add_recruits(i);
 	
+	// future recruitment
+	if(ipass>end_mo)
+	{
+	flag=0;
+	for(j=1;j<=rec_n_yr;j++)
+	{	 if((i%12+1)==rec_month_yr(j)) flag = 1;}
+	if(flag)
+		temp_n(1) += fut_rec;
+    }
+
 	n_at_len(i+1) = temp_n;
   
 //==============================================================================
@@ -244,16 +287,64 @@ FUNCTION evaluate_the_objective_function
   f_smooth = 0.1* (norm2(first_difference(first_difference(f_mort))));
      f += f_smooth;
 	 
-  cout<<surv_size_comp_like<< " " << surv_like << " " << catch_size_comp_like << " " << catch_like << " " << init_smooth << endl;
-   
+  m_prior_like = 0;
+	m_prior_like = square(m_mu_prior-nat_m) / (2.0*square(m_sd_prior));	
+	
+	f += m_prior_like;
+	 
+  cout<<surv_size_comp_like<< " " << surv_like << " " << catch_size_comp_like << " " << catch_like << " " << init_smooth << " " << m_prior_like<<endl;
+  
+ // ==========================================================================
+
+FUNCTION get_fut_mortality
+ int i;
+  for (i=ipass;i<=end_mo+proj_n;i++)
+  {
+   if (IsB0 == 0)
+    {
+   	applied_f(i) = 0; 
+	}
+   else 
+    {
+	applied_f(i) = fut_mort; 
+	}
+    applied_f(i) = elem_prod(applied_f(i),fish_sel); 	
+   }
+  
+//==============================================================================
+FUNCTION find_bzero
+  int nn; int j;
+  // Find B0
+  IsB0 = 0;
+  fut_rec = 0;
+  nn = 0;
+
+ //find average recruitment by month...these could be different
+ for(j=1;j<rec_n;j++)
+  {
+    fut_rec += mfexp(log_recruits(j));
+    nn += 1;
+  }
+  fut_rec = fut_rec/nn;
+  cout<<"futrec"<<fut_rec<<endl;
+  fut_mort = 0;
+  ipass = end_mo+1;
+  get_fut_mortality();
+   for (ipass=end_mo+1;ipass<end_mo+proj_n;ipass++) get_num_at_len_yr(); 
+  
 // ========================y==================================================   
 REPORT_SECTION
+  find_bzero();
+  
   report<<"$likelihoods"<<endl;
   report<<surv_size_comp_like<< " " << surv_like << " " << catch_size_comp_like << " " << catch_like <<endl;
   report <<"$recruits" << endl;
   report << mfexp(log_recruits)<<endl;
   report <<"$sizes" << endl;
   report << sizes<<endl;
+    report <<"$growth_inc" << endl;
+  report << mean_length<<endl;
+  
  //===survey inputs and ouputs
   report<<"$survey_months"<<endl;
   report<<surv_months<<endl;
@@ -261,6 +352,11 @@ REPORT_SECTION
   report<<surv_pred<<endl;
   report<<"$survey_obs"<<endl;
   report<<surv_obs_n<<endl;
+    report<<"$survey_selectivity"<<endl;
+  report<<surv_sel<<endl;
+      report<<"$fish_selectivity"<<endl;
+  report<<fish_sel<<endl;
+  
   report<<"$survey_pred_comp" << endl;
   for(int i=1; i<=surv_dat_mo; i++)
   {
@@ -315,7 +411,7 @@ REPORT_SECTION
   }
 
   report <<"$applied_f_matrix" << endl;
-  for(int i=start_mo; i<=end_mo; i++)
+  for(int i=start_mo; i<=end_mo+proj_n; i++)
   {
     report << applied_f(i)<<endl;
   }
@@ -325,6 +421,13 @@ REPORT_SECTION
     report << size_trans_matrix(i)<<endl;
   }
  
+   report <<"$n_at_len" << endl;
+  for(int i=start_mo; i<=end_mo+proj_n; i++)
+  {
+    report << n_at_len(i)<<endl;
+  }
+
+  save_gradients(gradients);
 
 RUNTIME_SECTION
 //one number for each phase, if more phases then uses the last number
