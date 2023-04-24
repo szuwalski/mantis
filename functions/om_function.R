@@ -9,8 +9,9 @@
 #     mature at 80mm
 #     live 3 to 4 years
 
-operating_model<-function(params,sim_data=FALSE,dat_file=NA,pin_file=NA)
+operating_model<-function(params,sim_data=FALSE,dat_file=NA,pin_file=NA,input_init=0,input_init_N=NA)
 {
+  set.seed(101)
 ###################################
 #==build a size transition matrix==
 make_size_trans<-function(alpha,beta,growth_sd,out_plot=FALSE,no_x=FALSE,
@@ -61,6 +62,8 @@ size_trans_1<-make_size_trans(alpha=params$alpha,
 #==make up initial numbers at size at time
 #==by iterating the size transition matrix
 #==on a recruitment
+if(input_init==0)
+{
 init_numbers<-matrix(ncol=length(params$mid_pts),nrow=4)
 dummy<-c(exp(10),rep(0,length(params$mid_pts)-1))
 counter<-0
@@ -75,12 +78,16 @@ for(x in 1:4)
   init_numbers[x,]<-dummy
   
 }
+use_init<-apply(init_numbers,2,sum)
+}
+if(input_init==1)
+  use_init<-input_init_N
 
 ###############################
 #==project population
 ###############################
 n_matrix<-matrix(ncol=length(params$mid_pts),nrow=c(params$tot_time_steps))
-n_matrix[1,]<-apply(init_numbers,2,sum)
+n_matrix[1,]<-use_init
 c_matrix<-matrix(ncol=length(params$mid_pts),nrow=c(params$tot_time_steps))
 
 #==set up for autocorrelated too and differences in intensity per
@@ -124,7 +131,7 @@ for(x in 1:(params$tot_time_steps))
 proj_t_step<-params$proj_yr*12
 proj_months<-seq(1,proj_t_step)
 n_matrix_b0<-matrix(ncol=length(params$mid_pts),nrow=c(proj_t_step))
-n_matrix_b0[1,]<-apply(init_numbers,2,sum)
+n_matrix_b0[1,]<-use_init
 
 proj_growth_months        <-proj_months[which(proj_months*rep(params$grow_month,params$proj_yr)!=0)]
 proj_rec_months           <-proj_months[which(proj_months*rep(params$rec_month,params$proj_yr)!=0)]
@@ -162,7 +169,7 @@ eq_spawner_bio<-sweep(eq_spawner_n,2,params$wt_at_size,FUN="*")
 # Rerun with no fishing to find dynamic unfished biomass
 ###################################################################
 n_matrix_dynb0<-matrix(ncol=length(params$mid_pts),nrow=c(params$tot_time_steps))
-n_matrix_dynb0[1,]<-apply(init_numbers,2,sum)
+n_matrix_dynb0[1,]<-use_init
 
 for(x in 1:(params$tot_time_steps))
 {
@@ -247,7 +254,7 @@ cat("\n",file=pin_file,append=TRUE)
 
 cat("# growth beta",file=pin_file,append=TRUE)
 cat("\n",file=pin_file,append=TRUE)
-cat(0.4,file=pin_file,append=TRUE)
+cat(3,file=pin_file,append=TRUE)
 cat("\n",file=pin_file,append=TRUE)
 
 cat("# growth slope",file=pin_file,append=TRUE)
@@ -409,6 +416,21 @@ cat("\n",file=dat_file,append=TRUE)
 cat("# survey eff N",file=dat_file,append=TRUE)
 cat("\n",file=dat_file,append=TRUE)
 cat(params$size_comp_weight_surv,file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+
+cat("# m_mu_prior",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+cat(params$nat_mort,file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+
+cat("# m_sd_prior",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+cat(5,file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+
+cat("# grow_var_phase",file=dat_file,append=TRUE)
+cat("\n",file=dat_file,append=TRUE)
+cat(-4,file=dat_file,append=TRUE)
 cat("\n",file=dat_file,append=TRUE)
 }
 
